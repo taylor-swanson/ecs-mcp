@@ -1,0 +1,7 @@
+.idea/
+.vscode/
+
+*.db
+.DS_Store
+ecs-mcp
+ecs-mcp.exe
