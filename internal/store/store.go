@@ -25,15 +25,17 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/taylor-swanson/ecs-mcp/internal/ecs"
+	"github.com/taylor-swanson/ecs-mcp/internal/field"
 
 	_ "embed"
 )
 
+//go:generate sqlc generate -f sql/sqlc.yml
+
 //go:embed sql/schema.sql
 var DDL string
 
-func NewDB(ctx context.Context, dbFile string, fields map[string]ecs.Field) (*sql.DB, error) {
+func NewDB(ctx context.Context, dbFile string, fields []*field.Field) (*sql.DB, error) {
 	// Remove existing DB if it exists. Create a new DB.
 	datasource := fmt.Sprintf("file:%s", dbFile)
 	if err := os.Remove(dbFile); err != nil && !os.IsNotExist(err) {
@@ -51,25 +53,25 @@ func NewDB(ctx context.Context, dbFile string, fields map[string]ecs.Field) (*sq
 
 	// Write fields to DB.
 	q := New(db)
-	for k, v := range fields {
-		_, err := q.InsertField(ctx, InsertFieldParams{
-			Name:        k,
+	var added int
+	for _, v := range fields {
+		if _, err = q.InsertField(ctx, InsertFieldParams{
+			Name:        v.FlatName,
 			DashedName:  v.DashedName,
-			FlatName:    v.FlatName,
 			Type:        v.Type,
 			Level:       v.Level,
 			Short:       nullString(v.Short),
 			Description: nullString(v.Description),
 			Example:     nullString(v.Example),
-		})
-		if err != nil {
-			slog.Error("unable to insert field", slog.String("field", k), slog.String("error", err.Error()))
+		}); err != nil {
+			slog.Error("unable to insert field", slog.String("field", v.FlatName), slog.String("error", err.Error()))
 		} else {
-			slog.Debug("Added field to DB", slog.String("field", k))
+			slog.Debug("Added field to DB", slog.String("field", v.FlatName))
+			added++
 		}
 	}
 
-	slog.Info("Added fields to DB")
+	slog.Info("Added fields to DB", slog.Int("count", added))
 
 	// Open DB as read-only.
 	datasource = fmt.Sprintf("file:%s?mode=ro", dbFile)
