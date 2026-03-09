@@ -29,7 +29,6 @@ type Field struct {
 	ID          int64
 	Name        string
 	DashedName  string
-	FlatName    string
 	Type        string
 	Level       string
 	Short       sql.NullString

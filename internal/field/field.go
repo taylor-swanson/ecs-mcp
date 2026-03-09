@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package ecs
+package field
 
 // Field represents a single ECS field.
 type Field struct {

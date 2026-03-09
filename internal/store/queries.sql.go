@@ -29,15 +29,14 @@ import (
 
 const insertField = `-- name: InsertField :one
 INSERT INTO
-    fields (name, dashed_name, flat_name, type, level, short, description, example)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    fields (name, dashed_name, type, level, short, description, example)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     RETURNING id
 `
 
 type InsertFieldParams struct {
 	Name        string
 	DashedName  string
-	FlatName    string
 	Type        string
 	Level       string
 	Short       sql.NullString
@@ -49,7 +48,6 @@ func (q *Queries) InsertField(ctx context.Context, arg InsertFieldParams) (int64
 	row := q.db.QueryRowContext(ctx, insertField,
 		arg.Name,
 		arg.DashedName,
-		arg.FlatName,
 		arg.Type,
 		arg.Level,
 		arg.Short,
