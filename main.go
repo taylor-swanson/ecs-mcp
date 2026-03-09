@@ -22,11 +22,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -44,8 +45,12 @@ import (
 
 var (
 	dbFile      string
-	ecsDir      string
+	gitRef      string
+	localFile   string
 	listen      string
+	certFile    string
+	keyFile     string
+	insecure    bool
 	showVersion bool
 	enableDebug bool
 	pretty      bool
@@ -69,15 +74,19 @@ func getBoolEnv(key string, target *bool) {
 
 func readEnv() {
 	getStringEnv("ECS_MCP_DB_FILE", &dbFile)
-	getStringEnv("ECS_MCP_ECS_DIR", &ecsDir)
+	getStringEnv("ECS_MCP_ECS_DIR", &localFile)
 	getStringEnv("ECS_MCP_LISTEN", &listen)
 	getBoolEnv("ECS_MCP_DEBUG", &enableDebug)
 }
 
 func parseArgs() {
 	flag.StringVar(&dbFile, "db", "ecs-mcp.db", "path to database file")
-	flag.StringVar(&ecsDir, "dir", "", "path to the ECS repository")
-	flag.StringVar(&listen, "listen", "", "listen for HTTP requests on this address, intead of stdin/stdout")
+	flag.StringVar(&gitRef, "git-ref", "main", "when fetching from GitHub, which git ref to use")
+	flag.StringVar(&localFile, "ecs-file", "", "path to the ECS ecs_flat.yml file (when omitted, fetches file from GitHub)")
+	flag.StringVar(&listen, "listen", "", "listen for HTTP requests on this address, instead of stdin/stdout")
+	flag.StringVar(&certFile, "cert", "cert.pem", "path to TLS certificate file")
+	flag.StringVar(&keyFile, "key", "key.pem", "path to TLS private key file")
+	flag.BoolVar(&insecure, "insecure", false, "disable TLS")
 	flag.BoolVar(&showVersion, "version", false, "print version information and exit")
 	flag.BoolVar(&enableDebug, "debug", false, "enable debug logging")
 	flag.BoolVar(&pretty, "pretty", false, "enable pretty logging")
@@ -85,12 +94,38 @@ func parseArgs() {
 	flag.Parse()
 }
 
+func fetchRemote() ([]byte, error) {
+	u, err := url.Parse("https://raw.githubusercontent.com/elastic/ecs/" + gitRef + "/generated/ecs/ecs_flat.yml")
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("Fetching remote ecs file", slog.String("url", u.String()))
+
+	res, err := http.Get(u.String())
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch remote ecs file: status %s", res.Status)
+	}
+
+	return io.ReadAll(res.Body)
+}
+
+func fetchLocal() ([]byte, error) {
+	slog.Debug("Fetching local ecs file", slog.String("path", localFile))
+	return os.ReadFile(localFile)
+}
+
 func runServer() (err error) {
 	modVer, vcsRef := getVersion()
 	slog.Info("Starting ecs-mcp", slog.String("version", modVer), slog.String("commit", vcsRef))
 
 	// Load ECS fields.
-	fields, err := loadFields(ecsDir)
+	fields, err := loadFields()
 	if err != nil {
 		return fmt.Errorf("unable to load ECS fields: %w", err)
 	}
@@ -142,15 +177,24 @@ func runServer() (err error) {
 		if strings.HasPrefix(listen, ":") {
 			srvURL = "localhost" + srvURL
 		}
-		srvURL = "http://" + srvURL
+		if insecure {
+			srvURL = "http://" + srvURL
+		} else {
+			srvURL = "https://" + srvURL
+		}
 
 		slog.Info("Starting server", slog.String("listen", httpSrv.Addr), slog.String("url", srvURL))
-		err = httpSrv.ListenAndServe()
 
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		} else if err != nil {
-			close(doneCh)
+		if insecure {
+			err = httpSrv.ListenAndServe()
+		} else {
+			err = httpSrv.ListenAndServeTLS(certFile, keyFile)
+		}
+		if err != nil {
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
+			}
+			cancel()
 		}
 		<-doneCh
 
@@ -180,10 +224,6 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "ecs-mcp version %s [commit %v]\n", modVer, vcsRef)
 		os.Exit(0)
 	}
-	if ecsDir == "" {
-		_, _ = fmt.Fprintln(os.Stderr, "ECS directory is required")
-		os.Exit(1)
-	}
 
 	level := slog.LevelInfo
 	if enableDebug {
@@ -203,7 +243,7 @@ func main() {
 	}
 }
 
-func getVersion() (modVer string, vcsRef string) {
+func getVersion() (modVer, vcsRef string) {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "", ""
@@ -221,21 +261,23 @@ func getVersion() (modVer string, vcsRef string) {
 	return modVer, vcsRef
 }
 
-func loadFields(dir string) (map[string]ecs.Field, error) {
+func loadFields() (map[string]ecs.Field, error) {
 	fields := map[string]ecs.Field{}
 
-	ecsFlatFile := filepath.Join(dir, "generated/ecs/ecs_flat.yml")
-	ecsFlat, err := os.ReadFile(ecsFlatFile)
+	var raw []byte
+	var err error
+	if localFile != "" {
+		raw, err = fetchLocal()
+	} else {
+		raw, err = fetchRemote()
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	err = yaml.Unmarshal(ecsFlat, &fields)
-	if err != nil {
+	if err = yaml.Unmarshal(raw, &fields); err != nil {
 		return nil, err
 	}
-
-	slog.Info("Read fields file", slog.String("file", ecsFlatFile), slog.Int("count", len(fields)))
 
 	return fields, nil
 }
