@@ -1,18 +1,27 @@
 # ecs-mcp
 
-`ecs-mcp` is a Model Context Protocol (MCP) server that enables LLMs to query 
+`ecs-mcp` is a Model Context Protocol (MCP) server that enables LLMs to query
 metadata about Elastic Common Schema (ECS).
 
 ## Features
 
-- Scans and indexes all ECS fields from your local `elastic/ecs` repository
-- Creates a queryable SQLite database with ECS field metadata
-- Exposes readonly database access to LLMs through the Model Context Protocol
+- Loads ECS field definitions from the official **ecs_flat.yml** file
+- **Fetches from GitHub by default** — no local ECS repo required; downloads
+  `ecs_flat.yml` from the [elastic/ecs](https://github.com/elastic/ecs) repository
+- Optional local file: use a local `ecs_flat.yml` path instead of GitHub
+- Builds a queryable SQLite database with ECS field metadata
+- Exposes read-only database access to LLMs through the Model Context Protocol
 - Enables AI assistants to answer detailed questions about ECS fields
 
 ## Usage
 
-### With `go run`
+### Default: fetch ECS from GitHub
+
+With no extra arguments, the server fetches the ECS definition from GitHub
+(`https://raw.githubusercontent.com/elastic/ecs/main/generated/ecs/ecs_flat.yml`)
+and uses it to build the database. No local ECS repo or file is required.
+
+#### With `go run`
 
 ```json
 {
@@ -21,24 +30,24 @@ metadata about Elastic Common Schema (ECS).
       "command": "go",
       "args": [
         "run",
-        "github.com/taylor-swanson/ecs-mcp@main",
-        "-dir"
-        "/Users/<USERNAME>/code/elastic/ecs"
+        "github.com/taylor-swanson/ecs-mcp@main"
       ]
     }
   }
 }
 ```
 
-### Local Install
+#### Local install
 
-Install the binary with
+Install the binary:
 
-`go install github.com/taylor-swanson/ecs-mcp`
-
-then determine the path using `which ecs-mcp`.
-
+```bash
+go install github.com/taylor-swanson/ecs-mcp
 ```
+
+Then use the binary path (e.g. from `which ecs-mcp`):
+
+```json
 {
   "mcpServers": {
     "ecs": {
@@ -48,23 +57,56 @@ then determine the path using `which ecs-mcp`.
 }
 ```
 
-### Required Arguments
+### Optional: use a local ECS file
 
-- `-dir`: **Required**. Path to your local checkout of the [elastic/ecs](https://github.com/elastic/ecs) repository.
+To use a local `ecs_flat.yml` instead of fetching from GitHub:
 
-### Optional Arguments
+```json
+{
+  "mcpServers": {
+    "ecs": {
+      "command": "/Users/<USERNAME>/go/bin/ecs-mcp",
+      "args": ["-ecs-file", "/path/to/ecs/generated/ecs/ecs_flat.yml"]
+    }
+  }
+}
+```
 
-- `-db`: Path to database file. Default: ecs-mcp.db
-- `-listen`: Listen for HTTP at the specified address, instead of using stdin/stdout
-- `-pretty`: Enable human-readable text logging
-- `-debug`: Enable debug logging
+### Optional: choose a different Git ref (branch or tag)
 
-## Database Schema
+When fetching from GitHub, you can pin to a branch or tag with `-git-ref`:
 
-The SQLite database contains information about ECS files including:
+```json
+{
+  "mcpServers": {
+    "ecs": {
+      "command": "/Users/<USERNAME>/go/bin/ecs-mcp",
+      "args": ["-git-ref", "v9.3.0"]
+    }
+  }
+}
+```
+
+## Command-line arguments
+
+| Argument     | Description | Environment variable |
+|-------------|-------------|----------------------|
+| `-db`       | Path to the SQLite database file (default: `ecs-mcp.db`) | `ECS_MCP_DB_FILE` |
+| `-ecs-file` | Path to a local **ecs_flat.yml** file. When omitted, the definition is fetched from GitHub. | `ECS_MCP_ECS_FILE` |
+| `-git-ref`  | When using GitHub, the git ref to use, e.g. `main` or `v9.3.0` (default: `main`) | `ECS_MCP_GIT_REF` |
+| `-listen`   | Listen for HTTP on the given address instead of stdio | `ECS_MCP_LISTEN` |
+| `-cert`     | Path to TLS certificate file (default: `cert.pem`), used with `-listen` | `ECS_MCP_CERT_FILE` |
+| `-key`      | Path to TLS private key file (default: `key.pem`), used with `-listen` | `ECS_MCP_KEY_FILE` |
+| `-insecure` | Disable TLS when using `-listen` | `ECS_MCP_INSECURE` |
+| `-version`  | Print version information and exit | — |
+| `-debug`    | Enable debug logging | `ECS_MCP_DEBUG` |
+
+## Database schema
+
+The SQLite database contains information about ECS fields from the flat definition, including:
 
 - **Fields**: Metadata about each field (name, type, description)
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the LICENSE.txt file for details.
+This project is licensed under the Apache License 2.0 — see the LICENSE.txt file for details.
