@@ -6,7 +6,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gorilla/handlers v1.5.2
 	github.com/modelcontextprotocol/go-sdk v1.4.0
-	modernc.org/sqlite v1.46.1
+	modernc.org/sqlite v1.47.0
 )
 
 require (
